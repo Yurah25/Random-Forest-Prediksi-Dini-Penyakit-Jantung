@@ -9,7 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import plot_tree 
 from sklearn.metrics import (
-    classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
+    classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, roc_curve, auc
 )
 import joblib, os, warnings
 
@@ -20,7 +20,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 MAX_DEPTH = 5
-
 
 print("Sedang mengunduh data langsung dari UCI Repository (ID=45)...")
 
@@ -108,10 +107,11 @@ model = Pipeline([
     ("preproc", preproc),
     ("clf", RandomForestClassifier(
         criterion="entropy",       
-        n_estimators=100,          
-        max_depth=MAX_DEPTH,        
+        n_estimators=1000,        
+        max_depth=MAX_DEPTH,          
         random_state=RANDOM_STATE,
-        n_jobs=-1                    
+        n_jobs=-1
+
     ))
 ])
 
@@ -121,16 +121,25 @@ model.fit(X_train, y_train)
 print("\n" + "="*40)
 print(" ANALISIS PERFORMA (TRAINING vs TESTING)")
 print("="*40)
+
 y_pred_train = model.predict(X_train)
 y_pred_test = model.predict(X_test)
 
+y_pred_proba_test = model.predict_proba(X_test)[:, 1]
+
 acc_train = accuracy_score(y_train, y_pred_train)
 acc_test = accuracy_score(y_test, y_pred_test)
-recall_test = recall_score(y_test, y_pred_test)
+prec_test = precision_score(y_test, y_pred_test)
+rec_test = recall_score(y_test, y_pred_test)
+f1_test = f1_score(y_test, y_pred_test)
+roc_auc_val = roc_auc_score(y_test, y_pred_proba_test)
 
 print(f"Akurasi Training : {acc_train:.4f} ({(acc_train*100):.2f}%)")
 print(f"Akurasi Testing  : {acc_test:.4f}  ({(acc_test*100):.2f}%)")
-print(f"Recall (Sensitivitas): {recall_test:.4f} (Kemampuan mendeteksi orang sakit)")
+print(f"Precision        : {prec_test:.4f} (Ketepatan prediksi positif)")
+print(f"Recall           : {rec_test:.4f} (Sensitivitas mendeteksi penyakit)")
+print(f"F1-Score         : {f1_test:.4f} (Harmonisasi Precision & Recall)")
+print(f"ROC-AUC Score    : {roc_auc_val:.4f} (Kualitas pembeda kelas)")
 
 if (acc_train - acc_test) > 0.10:
     print("-> STATUS: WARNING (Overfitting > 10%)")
@@ -165,6 +174,51 @@ except Exception as e:
     print(f"\n[SKIP] Gagal membuat feature importance: {e}")
 
 print("="*40 + "\n")
+
+
+try:
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba_test)
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC Curve (AUC = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate (Salah Deteksi Sehat jadi Sakit)')
+    plt.ylabel('True Positive Rate (Berhasil Deteksi Sakit)')
+    plt.title('Receiver Operating Characteristic (ROC)')
+    plt.legend(loc="lower right")
+    plt.grid(True, alpha=0.3)
+    
+    roc_filename = f"{OUTPUT_DIR}/roc_curve.png"
+    plt.savefig(roc_filename)
+    print(f" -> Grafik ROC tersimpan di: {roc_filename}")
+    plt.close()
+
+except Exception as e:
+    print(f"[SKIP] Gagal membuat grafik ROC: {e}")
+
+
+try:
+    cm = confusion_matrix(y_test, y_pred_test)
+    
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', linewidths=.5, cbar=False,
+                xticklabels=['Prediksi Sehat (0)', 'Prediksi Sakit (1)'],
+                yticklabels=['Aktual Sehat (0)', 'Aktual Sakit (1)'])
+    
+    plt.title('Confusion Matrix (Peta Detail Kesalahan)', fontsize=14)
+    plt.xlabel('Prediksi Model', fontsize=12)
+    plt.ylabel('Kenyataan (Data Asli)', fontsize=12)
+    cm_filename = f"{OUTPUT_DIR}/confusion_matrix_heatmap.png"
+    plt.savefig(cm_filename, dpi=300, bbox_inches='tight')
+    print(f" -> Gambar Confusion Matrix tersimpan di: {cm_filename}")
+    plt.close()
+
+except Exception as e:
+    print(f"[SKIP] Gagal membuat Confusion Matrix: {e}")
 
 joblib.dump(model, f"{OUTPUT_DIR}/random_forest_model.pkl")
 
